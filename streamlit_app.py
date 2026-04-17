@@ -10,7 +10,8 @@ st.set_page_config(page_title="Lunara Film | Bespoke Engine", layout="wide")
 
 @st.cache_data
 def load_data():
-    df = pd.read_csv(CSV_FILE)
+    # We add encoding='latin1' to handle special characters in movie titles
+    df = pd.read_csv(CSV_FILE, encoding='latin1') 
     df['WatchedAt'] = pd.to_datetime(df['WatchedAt'], errors='coerce')
     return df
 
