@@ -5,8 +5,7 @@ import random
 
 # 1. API & Data Setup
 TMDB_KEY = st.secrets["TMDB_API_KEY"]
-CSV_FILE = "TRAKT^0LETTERBOXD_WATCHED_DATA.xlsx - complete_movie_data.csv"
-
+CSV_FILE = "watch_data.csv"
 st.set_page_config(page_title="Lunara Film | Bespoke Engine", layout="wide")
 
 @st.cache_data
