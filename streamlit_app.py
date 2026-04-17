@@ -10,9 +10,24 @@ st.set_page_config(page_title="Lunara Film | Bespoke Engine", layout="wide")
 
 @st.cache_data
 def load_data():
-    # We add encoding='latin1' to handle special characters in movie titles
-    df = pd.read_csv(CSV_FILE, encoding='latin1') 
-    df['WatchedAt'] = pd.to_datetime(df['WatchedAt'], errors='coerce')
+    # Structural Hardening: Use engine='python' to auto-detect separators 
+    # and handle titles containing commas.
+    try:
+        df = pd.read_csv(
+            CSV_FILE, 
+            encoding='latin1', 
+            sep=None,            # Auto-detect if it's comma, tab, or semicolon
+            engine='python',      # More flexible than the standard C engine
+            on_bad_lines='warn'   # Skip corrupt lines instead of crashing the app
+        )
+    except Exception as e:
+        st.error(f"Critical Data Error: {e}")
+        return pd.DataFrame() # Return empty to prevent session collapse
+
+    # Ensure date columns are formatted for logic
+    if 'WatchedAt' in df.columns:
+        df['WatchedAt'] = pd.to_datetime(df['WatchedAt'], errors='coerce')
+    
     return df
 
 df = load_data()
