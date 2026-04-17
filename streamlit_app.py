@@ -5,50 +5,60 @@ import random
 
 # 1. API & Data Setup
 TMDB_KEY = st.secrets["TMDB_API_KEY"]
-CSV_FILE = "watch_data.csv" # Ensure your file on GitHub is named watch_data.csv
+CSV_FILE = "watch_data.csv"
 
 st.set_page_config(page_title="Lunara Film | Bespoke Engine", page_icon="🎬", layout="wide")
 
 @st.cache_data
-def load_data():
+def load_data_nuclear():
     try:
-        # KERNEL-HARDENED PARSER: Forcing comma separation and skipping broken rows
+        # Step 1: Raw Scan to find the Header Row
+        # This prevents the 'Expected 3 fields, saw 4' error by finding the real start
+        skip_rows = 0
+        with open(CSV_FILE, 'r', encoding='latin1') as f:
+            for i, line in enumerate(f):
+                if 'tmdb' in line.lower() and 'title' in line.lower():
+                    skip_rows = i
+                    break
+        
+        # Step 2: High-Precision Load
         df = pd.read_csv(
             CSV_FILE, 
             encoding='latin1', 
-            sep=',', 
+            skiprows=skip_rows,
             on_bad_lines='skip', 
             engine='python'
         )
-        # COLUMN SCRUBBING: Removes hidden characters, spaces, or quotes from headers
-        df.columns = [str(c).strip().replace('"', '').replace("'", "") for c in df.columns]
         
-        if 'WatchedAt' in df.columns:
-            df['WatchedAt'] = pd.to_datetime(df['WatchedAt'], errors='coerce')
+        # Step 3: Absolute Column Normalization
+        # We strip quotes, spaces, and force EVERYTHING to lowercase for zero-error matching
+        df.columns = [str(c).strip().replace('"', '').replace("'", "").lower() for c in df.columns]
+        
+        # Standardize dates
+        if 'watchedat' in df.columns:
+            df['watchedat'] = pd.to_datetime(df['watchedat'], errors='coerce')
+        
         return df
     except Exception as e:
-        st.error(f"Critical System Failure during data ingestion: {e}")
+        st.error(f"Nuclear Load Failed: {e}")
         return pd.DataFrame()
 
-df = load_data()
+# Boot the Data
+df = load_data_nuclear()
 
-# ROBUST COLUMN MAPPING: Prevents KeyError by searching for columns dynamically
-tmdb_col = next((c for c in df.columns if 'tmdb' in c.lower()), None)
-rating_col = next((c for c in df.columns if 'rating' in c.lower()), None)
-title_col = next((c for c in df.columns if 'title' in c.lower()), 'Title')
+# Safety Check: If data failed to load, stop and warn Dalton
+if df.empty:
+    st.error("Critical Failure: No movie data could be parsed. Check your 'watch_data.csv' file on GitHub.")
+    st.stop()
 
-if tmdb_col:
-    # Create the exclusion list
-    watched_ids = set(pd.to_numeric(df[tmdb_col], errors='coerce').dropna().astype(int).tolist())
-else:
-    st.warning("Data-Link Warning: 'TMDb' column not found. All results will be treated as 'New'.")
-    watched_ids = set()
+# 2. Bespoke Mapping (Now using absolute lowercase names)
+# We use .get() to prevent KeyErrors forever
+watched_ids = set(pd.to_numeric(df['tmdb'], errors='coerce').dropna().astype(int).tolist()) if 'tmdb' in df.columns else set()
+ratings_available = 'rating' in df.columns
 
-# 2. UI Elements
+# UI Elements
 st.sidebar.title("Lunara Film Engine")
-st.sidebar.write("Operator: Dalton")
-st.sidebar.caption(f"Loaded {len(df)} films from history.")
-
+st.sidebar.write(f"✅ Loaded {len(df)} films.")
 mode = st.sidebar.radio("Select Workflow", ["Discovery (Evolution)", "Rewatch (Comfort)"])
 
 st.title("🎬 Bespoke Recommendation Engine")
@@ -69,38 +79,31 @@ def show_movie(movie, reason=""):
 if mode == "Discovery (Evolution)":
     st.header("The Critic's Evolution")
     if st.button("Generate Discoveries"):
-        # Identify your 10/10 seeds
-        if rating_col and tmdb_col:
-            top_rated = df[df[rating_col] >= 9].copy()
-            if not top_rated.empty:
-                seeds = top_rated.sample(min(3, len(top_rated)))[tmdb_col].tolist()
-                pool = []
-                for sid in seeds:
+        # Use movies rated 9 or 10 as seeds
+        seed_pool = df[df['rating'] >= 9] if ratings_available else df
+        if not seed_pool.empty:
+            seeds = seed_pool.sample(min(3, len(seed_pool)))['tmdb'].tolist()
+            pool = []
+            for sid in seeds:
+                try:
                     res = requests.get(f"https://api.themoviedb.org/3/movie/{int(sid)}/recommendations?api_key={TMDB_KEY}").json()
                     for r in res.get('results', []):
-                        if r['id'] not in watched_ids:
-                            pool.append(r)
-                
-                if pool:
-                    picks = random.sample(pool, min(5, len(pool)))
-                    for m in picks:
-                        show_movie(m, "Based on your high-rated history.")
-                else:
-                    st.write("No new discoveries found for these seeds. Try again.")
-            else:
-                st.write("No films rated 9 or 10 found in your data.")
-        else:
-            st.write("TMDb or Rating data missing from file.")
+                        if r['id'] not in watched_ids: pool.append(r)
+                except: continue
+            
+            if pool:
+                picks = random.sample(pool, min(5, len(pool)))
+                for m in picks: show_movie(m, "Based on your high-rated history.")
+            else: st.write("Try again for more results.")
 
 else:
     st.header("The Curator's Comfort")
     if st.button("Get Rewatch Targets"):
-        if rating_col and tmdb_col:
-            favorites = df[df[rating_col] >= 9].copy()
-            if not favorites.empty:
-                picks = favorites.sample(min(5, len(favorites)))
-                for _, row in picks.iterrows():
-                    details = requests.get(f"https://api.themoviedb.org/3/movie/{int(row[tmdb_col])}?api_key={TMDB_KEY}").json()
-                    show_movie(details, f"Rewatch Target: You rated this {row[rating_col]}/10.")
-            else:
-                st.write("No high-rated films found for rewatching.")
+        favorites = df[df['rating'] >= 9] if ratings_available else df
+        if not favorites.empty:
+            picks = favorites.sample(min(5, len(favorites)))
+            for _, row in picks.iterrows():
+                try:
+                    details = requests.get(f"https://api.themoviedb.org/3/movie/{int(row['tmdb'])}?api_key={TMDB_KEY}").json()
+                    show_movie(details, f"Rewatch Target: Last rated {row.get('rating', 'N/A')}/10.")
+                except: continue
